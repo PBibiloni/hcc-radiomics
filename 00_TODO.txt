@@ -1,0 +1,11 @@
+Add support for processing different phases
+    * Co-registration.
+    * Feature extraction.
+
+
+Split train/test patients.
+
+Reslice all images to the same resolution.
+
+
+RedCTTACE > Objective function: Recist: mix RP/RC into single class.

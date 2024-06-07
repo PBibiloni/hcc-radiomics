@@ -14,6 +14,7 @@ from lib.dcmutils import main_orientation_axis
 
 log = logging.getLogger(__name__)
 
+
 class Radcttace:
     def __init__(self, path, only_patients=None):
         self.path = path
@@ -153,13 +154,13 @@ class DicomDir(Image):
 
     def pixel_array(self):
         """ Returns the pixel array of the segmentation. """
-        return np.stack([dcm.pixel_array for dcm in self.dcmset], axis=0)   # Since slices are axial and sorted.
+        return np.stack([dcm.pixel_array for dcm in self.dcmset], axis=-1)   # Since slices are axial and sorted.
 
     def pixel_spacing_mm(self):
         """ Returns the pixel width for each dimension. """
         ps = self.dcmset[0].PixelSpacing
         st = self.dcmset[0].SliceThickness
-        return [float(st), float(ps[0]), float(ps[1])]  # Since it has axial orientation
+        return [float(ps[0]), float(ps[1]), float(st)]  # Since it has axial orientation
 
 
 class DicomSeg(Image):
@@ -182,14 +183,14 @@ class DicomSeg(Image):
         for idx_seg, slice in enumerate(self.dcmseg.PerFrameFunctionalGroupsSequence):
             try:
                 idx_ct = idx_by_positionpatient[slice.PlanePositionSequence[0].ImagePositionPatient[2]]
-                mask[idx_ct, :, :] = mask_cropped[idx_seg, :, :]
+                mask[:, :, idx_ct] = mask_cropped[idx_seg, :, :]
             except KeyError:
                 # TODO: interpolate idx as best efforts-approach?
-                log.warning(f'{self.acquisition} > Slice {idx_seg} from segmentation not found in CT.')
+                log.error(f'{self.acquisition} > Slice {idx_seg} from segmentation not found in CT.')
         return mask
 
     def pixel_spacing_mm(self):
         """ Returns the pixel width for each dimension. """
         ps = self.dcmseg.SharedFunctionalGroupsSequence[0].PixelMeasuresSequence[0].PixelSpacing
         st = self.dcmseg.SharedFunctionalGroupsSequence[0].PixelMeasuresSequence[0].SliceThickness
-        return [float(st), float(ps[0]), float(ps[1])]  # Since it has axial orientation
+        return [float(ps[0]), float(ps[1]), float(st)]  # Since it has axial orientation

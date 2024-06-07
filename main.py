@@ -8,13 +8,13 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 
-from lib import features
+from lib import features, masks
 from lib.dataset import Radcttace
 
 ROOT_PATH = Path(__file__).parent / 'data' / 'RadCTTACEomics_v2024.05'
 OUTPUT_PATH = Path(__file__).parent / 'output' / datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 DELETE_PREVIOUS_OUTPUT_DIRS = True
-SAVE_MEDIAN_AXIAL_SLICES = False
+SAVE_MEDIAN_AXIAL_SLICES = True
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ if DELETE_PREVIOUS_OUTPUT_DIRS:
 
 # Initialize dataset
 dataset = Radcttace(path=ROOT_PATH)
-dataset_train, _ = dataset.split(ratio=0.10)
+dataset_train, _ = dataset.split(ratio=0.02)
 
 # Extract features
 features_per_patient = {}
@@ -47,19 +47,22 @@ for idx, patient in enumerate(dataset_train.patients):
         plt.close(fig)
 
     # Generate derived segmentation masks
-    segmentations = {
-        'Tumor': seg_tumor,
-        # 'Liver': seg_liver,
-        # 'TumorPerimeterInner': inner_perimeter_mask(seg_tumor, width_mm=10),
-        # 'TumorPrimeterOuter': outer_perimeter_mask(seg_tumor, seg_liver, width_mm=10),
-        # 'TumorCore': tumor_core_mask(seg_tumor, radius_mm=10)
+    named_masks = {
+        'Tumor': masks.whole_tumor(seg_tumor),
+        'Liver': masks.whole_liver(seg_liver, seg_tumor),
+        'LiverInterior': masks.liver_interior(seg_liver, seg_tumor, width_to_erode_mm=10),
+        'TumorInterior': masks.tumor_interior(seg_tumor, width_to_erode_mm=10),
+        'LiverCore': masks.liver_core(seg_liver, seg_tumor, radius_mm=10),
+        'TumorCore': masks.tumor_core(seg_tumor, radius_mm=10),
+        'TumorPerimeterInner': masks.tumor_inner_perimeter(seg_tumor, width_mm=10),
+        'TumorPerimeterOuter': masks.tumor_outer_perimeter(seg_liver, seg_tumor, width_mm=10),
     }
 
     # Compute features
     all_features = {}
-    for seg_name, seg in segmentations.items():
-        for feature_name, feature_value in features.dummy_features(ct=ct, segmentation=seg).items():
-            all_features[f'{seg_name}_{feature_name}'] = feature_value
+    for mask_name, mask in named_masks.items():
+        for feature_name, feature_value in features.dummy_features(ct=ct, mask=mask).items():
+            all_features[f'{mask_name}_{feature_name}'] = feature_value
     features_per_patient[patient.name] = all_features
 
 # Save all features

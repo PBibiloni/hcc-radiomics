@@ -9,3 +9,8 @@ Reslice all images to the same resolution.
 
 
 RedCTTACE > Objective function: Recist: mix RP/RC into single class.
+
+
+# SANITY CHECKS
+
+Visualization for tumor/liver masks: are they correct ??

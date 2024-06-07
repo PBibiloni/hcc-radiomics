@@ -35,8 +35,8 @@ def liver_core(liver_dicomseg, tumor_dicomseg, radius_mm):
     center_idx = np.argmax(distance_transform_cdt(liver_mask & ~tumor_mask))
     liver_core_mask = np.zeros_like(liver_mask)
     liver_core_mask[np.unravel_index(center_idx, liver_core_mask.shape)] = 1
-    liver_core_mask = dilation_on_bounding_box(tumor_dicomseg.pixel_array(), se)
-    return liver_core_mask
+    liver_core_mask = dilation_on_bounding_box(liver_core_mask, se)
+    return liver_core_mask & liver_mask
 
 
 def tumor_core(tumor_dicomseg, radius_mm):
@@ -47,21 +47,23 @@ def tumor_core(tumor_dicomseg, radius_mm):
     se = SphericalStructuringElement.get(tumor_dicomseg.pixel_spacing_mm(), radius_mm)
     tumor_core_mask = np.zeros_like(tumor_mask)
     tumor_core_mask[np.unravel_index(center_idx, tumor_core_mask.shape)] = 1
-    tumor_core_mask = dilation_on_bounding_box(tumor_dicomseg.pixel_array(), se)
-    return tumor_core_mask
+    tumor_core_mask = dilation_on_bounding_box(tumor_core_mask, se)
+    return tumor_core_mask & tumor_mask
 
 
 def tumor_inner_perimeter(tumor_dicomseg, width_mm):
     se = SphericalStructuringElement.get(tumor_dicomseg.pixel_spacing_mm(), width_mm)
-    tumor_core_mask = erosion_on_bounding_box(tumor_dicomseg.pixel_array(), se)
-    inner_perimeter_mask = tumor_dicomseg.pixel_array() & ~tumor_core_mask
+    tumor_mask = tumor_dicomseg.pixel_array()
+    tumor_eroded_mask = erosion_on_bounding_box(tumor_mask, se)
+    inner_perimeter_mask = tumor_mask & ~tumor_eroded_mask
     return inner_perimeter_mask
 
 
 def tumor_outer_perimeter(liver_dicomseg, tumor_dicomseg, width_mm):
     se = SphericalStructuringElement.get(tumor_dicomseg.pixel_spacing_mm(), width_mm)
-    tumor_dilated = dilation_on_bounding_box(tumor_dicomseg.pixel_array(), se)
-    outer_perimeter_mask = tumor_dilated & ~tumor_dicomseg.pixel_array() & liver_dicomseg.pixel_array()
+    tumor_mask = tumor_dicomseg.pixel_array()
+    tumor_dilated = dilation_on_bounding_box(tumor_mask, se)
+    outer_perimeter_mask = tumor_dilated & ~tumor_mask & liver_dicomseg.pixel_array()
     return outer_perimeter_mask
 
 

@@ -5,7 +5,8 @@ from typing import Iterator, Optional
 import matplotlib
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, animation
+from matplotlib.patches import Patch
 from skimage import transform
 import highdicom as hd
 import pydicom
@@ -88,32 +89,94 @@ class Acquisition:
             raise ValueError(f'Segmentation {segmentation_path} does not exist.')
         return DicomSeg(self, segmentation_path, ct=self.ct())
 
-    def plot_slice(self, ax: plt.Axes, axis: int = 0, idx: Optional[int] = None, vmin=None, vmax=None):
+    def plot_slice(self, ax: plt.Axes, axis: int = 2, idx_slice: Optional[int] = None,
+                   masks: Optional[dict] = None,
+                   vmin: Optional[int] = -100, vmax: Optional[int] = 400):
+        """ Plots a slice from the CT image.
+        * Masks: dict {'name', mask} where mask is a boolean array with the same shape as the CT image. Default: None (liver/tumor segs)
+        * Axis: axis to plot the slice according to LFS. Default: 2 (axial)
+        """
+        ax.set_axis_off()
+
         img = self.ct().pixel_array()
-        if idx is None:
-            idx = img.shape[axis] // 2
+        if idx_slice is None:
+            idx_slice = img.shape[axis] // 2
 
-        log.info(f'{self} > Plotting slice {idx} from axis {axis}.')
+        log.info(f'{self} > Plotting slice {idx_slice} from axis {axis}.')
 
-        img_slice = img.take(indices=idx, axis=axis)
+        img_slice = img.take(indices=idx_slice, axis=axis)
         px_spacing = self.ct().pixel_spacing_mm()
         px_spacing.pop(axis)
         aspect = px_spacing[0] / px_spacing[1]
-        norm = matplotlib.colors.Normalize(vmin=vmin if vmin is not None else img_slice.min(),
-                                           vmax=vmax if vmax is not None else img_slice.max())
+        norm = matplotlib.colors.Normalize(vmin=vmin if vmin is not None else np.min(img_slice),
+                                           vmax=vmax if vmax is not None else np.max(img_slice))
         img_cmapped = matplotlib.colormaps['bone'](norm(img_slice))[..., :3]
-        try:
-            seg_liver = self.segmentation_liver().pixel_array().take(indices=idx, axis=axis)
-            seg_tumor = self.segmentation_tumor().pixel_array().take(indices=idx, axis=axis)
-            mask_slice = np.zeros_like(seg_liver)
-            mask_slice[seg_liver] = 1
-            mask_slice[seg_tumor] = 2
-            mask_nonzero = np.tile((mask_slice > 0)[..., np.newaxis], [1, 1, 3])
-            mask_cmapped = plt.colormaps['Set1'](mask_slice)[..., :3]
-            mask_cmapped[~mask_nonzero] = 0
-            ax.imshow(img_cmapped * (1 - 0.5 * mask_nonzero) + mask_cmapped * 0.5 * mask_nonzero, aspect=aspect)
-        except ValueError:
+
+        if masks is None:
+            try:
+                masks = {
+                    'Liver': self.segmentation_liver().pixel_array(),
+                    'Tumor': self.segmentation_tumor().pixel_array(),
+                }
+            except ValueError:
+                masks = {}
+
+        if len(masks) == 0:
             ax.imshow(img_cmapped, aspect=aspect)
+        else:
+            mask_slice = np.zeros(shape=img_slice.shape, dtype=int)
+            masks_list = [(name, mask) for name, mask in masks.items()]
+            masks_list.sort(key=lambda x: x[1].sum(), reverse=True)
+
+            cmap = plt.colormaps['Set1']
+            legend_handles = []
+            legend_labels = []
+            for idx_mask, (mask_name, mask) in enumerate(masks_list):
+                mask_slice[mask.take(indices=idx_slice, axis=axis)] = idx_mask + 1
+                color = cmap(idx_mask + 1)
+                legend_handles.append(Patch(color=color, label=mask_name))
+                legend_labels.append(mask_name)
+
+            mask_nonzero = np.tile((mask_slice > 0)[..., np.newaxis], [1, 1, 3])
+            mask_cmapped = cmap(mask_slice)[..., :3]
+            mask_cmapped[~mask_nonzero] = 0
+
+            # Legend
+            ax.legend(handles=legend_handles, labels=legend_labels, loc='upper right', fontsize='x-small')
+
+            return ax.imshow(img_cmapped * (1 - 0.5 * mask_nonzero) + mask_cmapped * 0.5 * mask_nonzero, aspect=aspect)
+
+    def plot_gif(self, fig: plt.Figure, ax: plt.Axes, axis: int = 2, num_slices: Optional[int] = 32,
+                   masks: Optional[dict] = None,
+                   vmin: Optional[int] = -100, vmax: Optional[int] = 400):
+        """ Plots a gif with slices from the CT image.
+        * Masks: see `plot_slice`.
+        * num_slices: None plots all of them. Default: 32."""
+        if masks is None:
+            # Compute them only once
+            masks = {
+                'Liver': self.segmentation_liver().pixel_array(),
+                'Tumor': self.segmentation_tumor().pixel_array(),
+            }
+
+        if vmin is None:
+            vmin = np.min(self.ct().pixel_array())
+        if vmax is None:
+            vmax = np.max(self.ct().pixel_array())
+
+        sh = self.ct().pixel_array().shape
+        if num_slices is None:
+            num_slices = sh[axis]
+        else:
+            num_slices = min(num_slices, sh[axis])
+
+        fig, ax = plt.subplots()
+        animation_data = [
+            [self.plot_slice(ax, axis=axis, idx_slice=idx, masks=masks, vmin=vmin, vmax=vmax)]
+            for idx in np.linspace(0, sh[axis]-1, num_slices).astype(int)
+        ]
+        anim = animation.ArtistAnimation(fig, animation_data, interval=250, blit=True)
+        return anim
 
     def __str__(self):
         return f'{self.patient} {self.path.name}'
@@ -174,8 +237,9 @@ class DicomSeg(Image):
 
     def pixel_array(self):
         """ Returns the pixel array of the segmentation. """
-        mask_cropped = self.dcmseg.pixel_array == self.dcmseg.get_segment_numbers()[0]
-        mask = np.zeros(shape=(len(self.ct.dcmset), mask_cropped.shape[1], mask_cropped.shape[2]), dtype=bool)
+        dcmseg_pixelarray = np.moveaxis(self.dcmseg.pixel_array, [0, 1, 2], [2, 0, 1])  # Set to LFS orientation
+        mask_cropped = dcmseg_pixelarray == self.dcmseg.get_segment_numbers()[0]
+        mask = np.zeros(shape=(dcmseg_pixelarray.shape[0], dcmseg_pixelarray.shape[1], len(self.ct.dcmset)), dtype=bool)
         idx_by_positionpatient = {
             ct_dcm.ImagePositionPatient[2]: idx
             for idx, ct_dcm in enumerate(self.ct.dcmset)
@@ -183,7 +247,7 @@ class DicomSeg(Image):
         for idx_seg, slice in enumerate(self.dcmseg.PerFrameFunctionalGroupsSequence):
             try:
                 idx_ct = idx_by_positionpatient[slice.PlanePositionSequence[0].ImagePositionPatient[2]]
-                mask[:, :, idx_ct] = mask_cropped[idx_seg, :, :]
+                mask[:, :, idx_ct] = mask_cropped[:, :, idx_seg]
             except KeyError:
                 # TODO: interpolate idx as best efforts-approach?
                 log.error(f'{self.acquisition} > Slice {idx_seg} from segmentation not found in CT.')

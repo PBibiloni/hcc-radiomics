@@ -14,7 +14,8 @@ from lib.dataset import Radcttace
 ROOT_PATH = Path(__file__).parent / 'data' / 'RadCTTACEomics_v2024.05'
 OUTPUT_PATH = Path(__file__).parent / 'output' / datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 DELETE_PREVIOUS_OUTPUT_DIRS = True
-SAVE_MEDIAN_AXIAL_SLICES = True
+PNG_MEDIAN_AXIAL_SLICES = True
+GIF_AXIAL_SLICES = True
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -38,14 +39,6 @@ for idx, patient in enumerate(dataset_train.patients):
     seg_tumor = acq.segmentation_tumor()
     seg_liver = acq.segmentation_liver()
 
-    if SAVE_MEDIAN_AXIAL_SLICES:
-        fig, ax = plt.subplots()
-        acq.plot_slice(ax, vmin=0, vmax=400)
-        os.makedirs(OUTPUT_PATH / 'MedianAxialSlices', exist_ok=True)
-        fig.savefig(OUTPUT_PATH / 'MedianAxialSlices' / f'{patient.name}.png')
-        # fig.show()
-        plt.close(fig)
-
     # Generate derived segmentation masks
     named_masks = {
         'Tumor': masks.whole_tumor(seg_tumor),
@@ -57,6 +50,23 @@ for idx, patient in enumerate(dataset_train.patients):
         'TumorPerimeterInner': masks.tumor_inner_perimeter(seg_tumor, width_mm=10),
         'TumorPerimeterOuter': masks.tumor_outer_perimeter(seg_liver, seg_tumor, width_mm=10),
     }
+
+    if PNG_MEDIAN_AXIAL_SLICES:
+        fig, ax = plt.subplots()
+        acq.plot_slice(ax, masks=named_masks)
+        os.makedirs(OUTPUT_PATH / 'AxialSlices', exist_ok=True)
+        fig.savefig(OUTPUT_PATH / 'AxialSlices' / f'{patient.name}.png')
+        # fig.show()
+        plt.close(fig)
+
+    if GIF_AXIAL_SLICES:
+        fig, ax = plt.subplots()
+        anim = acq.plot_gif(fig, ax, masks=named_masks)
+        os.makedirs(OUTPUT_PATH / 'AxialSlices', exist_ok=True)
+        anim.save(OUTPUT_PATH / 'AxialSlices' / f'{patient.name}.gif')
+        plt.close(fig)
+
+
 
     # Compute features
     all_features = {}
